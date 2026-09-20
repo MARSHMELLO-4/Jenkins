@@ -1,8 +1,9 @@
-pipeline{
+```groovy
+pipeline {
     agent any
 
     tools {
-        nodejs: 'NodeJS-26'
+        nodejs 'NodeJS-26'
     }
 
     options {
@@ -11,124 +12,162 @@ pipeline{
         disableConcurrentBuilds()
     }
 
+    environment {
+        APP_DIR = 'jenkins-node-demo'
+    }
+
     stages {
+
         stage('Checkout') {
             steps {
                 checkout scm
+
+                sh '''
+                    echo "Workspace:"
+                    pwd
+
+                    echo "Repository contents:"
+                    ls -la
+
+                    echo "Application contents:"
+                    ls -la jenkins-node-demo
+                '''
             }
         }
 
-        stage('Install Dependenvies'){
+        stage('Install Dependencies') {
             steps {
-                sh 'npm ci'
-            }
-        }
-
-        stage('Lint'){
-            steps {
-                sh 'npm run lint'
-            }
-        }
-
-        stage('Tests'){
-            steps {
-                sh 'npm run test:ci'
-            }
-
-            post {
-                always {
-                    junit testResults: 'reports/junit/junit.xml'
+                dir("${APP_DIR}") {
+                    sh 'npm ci'
                 }
             }
         }
 
-        stage('Build'){
-            steps{
-                sh 'npm run build'
+        stage('Lint') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'npm run lint'
+                }
+            }
+        }
+
+        stage('Tests') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'npm run test:ci'
+                }
+            }
+
+            post {
+                always {
+                    junit testResults: "${APP_DIR}/reports/junit/junit.xml"
+                }
+            }
+        }
+
+        stage('Build') {
+            steps {
+                dir("${APP_DIR}") {
+                    sh 'npm run build'
+                }
             }
         }
 
         stage('Package') {
             steps {
-                sh '''
-                    tar -czf node-demo-${BUILD_NUMBER}.tar.gz \
-                        dist package.json package-lock.json
-                '''
+                dir("${APP_DIR}") {
+                    sh """
+                        tar -czf node-demo-${BUILD_NUMBER}.tar.gz \\
+                            dist package.json package-lock.json
+                    """
 
-                archiveArtifacts artifacts: "node-demo-${BUILD_NUMBER}.tar.gz"
+                    archiveArtifacts artifacts: "node-demo-${BUILD_NUMBER}.tar.gz"
+                }
             }
         }
 
         stage('Deploy') {
-
             when {
                 branch 'master'
             }
 
             steps {
+                dir("${APP_DIR}") {
+                    sh '''
+                        set -e
 
-                sh '''
-                    set -e
+                        DEPLOY_ROOT=/opt/cicd-demo/node
+                        RELEASE_DIR="$DEPLOY_ROOT/releases/$BUILD_NUMBER"
 
-                    DEPLOY_ROOT=/opt/cicd-demo/node
-                    RELEASE_DIR="$DEPLOY_ROOT/releases/$BUILD_NUMBER"
+                        echo "Deploying build $BUILD_NUMBER"
+                        echo "Release directory: $RELEASE_DIR"
 
-                    echo "Deploying build $BUILD_NUMBER"
-                    echo "Release directory: $RELEASE_DIR"
+                        mkdir -p "$DEPLOY_ROOT/releases"
 
-                    rm -rf "$RELEASE_DIR"
-                    mkdir -p "$RELEASE_DIR"
+                        rm -rf "$RELEASE_DIR"
+                        mkdir -p "$RELEASE_DIR"
 
-                    ARTIFACT="node-demo-${BUILD_NUMBER}.tar.gz"
+                        ARTIFACT="node-demo-${BUILD_NUMBER}.tar.gz"
 
-                    tar -xzf "$ARTIFACT" -C "$RELEASE_DIR"
+                        echo "Extracting artifact: $ARTIFACT"
 
-                    cd "$RELEASE_DIR"
+                        tar -xzf "$ARTIFACT" -C "$RELEASE_DIR"
 
-                    npm ci --omit=dev
+                        cd "$RELEASE_DIR"
 
-                    if [ -f "$DEPLOY_ROOT/app.pid" ]; then
+                        echo "Installing production dependencies..."
 
-                        OLD_PID=$(cat "$DEPLOY_ROOT/app.pid" || true)
+                        npm ci --omit=dev
 
-                        if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
+                        if [ -f "$DEPLOY_ROOT/app.pid" ]; then
 
-                            echo "Stopping old application: $OLD_PID"
+                            OLD_PID=$(cat "$DEPLOY_ROOT/app.pid" || true)
 
-                            kill "$OLD_PID" || true
+                            if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
 
-                            sleep 2
+                                echo "Stopping old application: $OLD_PID"
+
+                                kill "$OLD_PID" || true
+
+                                sleep 2
+
+                            fi
                         fi
-                    fi
 
-                    ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
+                        ln -sfn "$RELEASE_DIR" "$DEPLOY_ROOT/current"
 
-                    echo "Starting new application"
+                        echo "Starting new application..."
 
-                    JENKINS_NODE_COOKIE=dontKillMe \
-                    APP_VERSION="$BUILD_NUMBER" \
-                    PORT=3000 \
-                    nohup node dist/server.js \
-                    > "$DEPLOY_ROOT/app.log" 2>&1 &
+                        JENKINS_NODE_COOKIE=dontKillMe \
+                        APP_VERSION="$BUILD_NUMBER" \
+                        PORT=3000 \
+                        nohup node dist/server.js \
+                        > "$DEPLOY_ROOT/app.log" 2>&1 &
 
-                    echo $! > "$DEPLOY_ROOT/app.pid"
+                        echo $! > "$DEPLOY_ROOT/app.pid"
 
-                    echo "Application PID:"
-                    cat "$DEPLOY_ROOT/app.pid"
-                '''
+                        echo "Application PID:"
+                        cat "$DEPLOY_ROOT/app.pid"
+                    '''
+                }
             }
         }
 
         stage('Smoke Test') {
-
             when {
                 branch 'master'
             }
 
             steps {
                 sh '''
+                    echo "Waiting for application to start..."
                     sleep 2
+
+                    echo "Running health check..."
+
                     curl -f http://127.0.0.1:3000/health
+
+                    echo "Smoke test passed."
                 '''
             }
         }
@@ -145,3 +184,4 @@ pipeline{
         }
     }
 }
+```

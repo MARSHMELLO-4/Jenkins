@@ -29,7 +29,7 @@ pipeline {
                     ls -la
 
                     echo "Application contents:"
-                    ls -la jenkins-node-demo
+                    ls -la Jenkins-node-demo
                 '''
             }
         }

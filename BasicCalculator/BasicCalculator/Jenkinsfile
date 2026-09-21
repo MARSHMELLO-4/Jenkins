@@ -14,6 +14,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
+                deleteDir()
                 checkout scm
             }
         }
@@ -21,7 +22,24 @@ pipeline {
         stage('Compile') {
             steps {
                 dir("${APP_DIR}") {
-                    sh './mvnw -B -DskipTests compile'
+                    sh '''
+                                    echo "Current directory:"
+                                    pwd
+
+                                    echo "mvnw permissions:"
+                                    ls -la mvnw
+
+                                    echo "Git file mode:"
+                                    git ls-files --stage mvnw || true
+
+                                    echo "Trying chmod:"
+                                    chmod +x mvnw
+
+                                    echo "After chmod:"
+                                    ls -la mvnw
+
+                                    ./mvnw -B -DskipTests compile
+                                '''
                 }
             }
         }
